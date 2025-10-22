@@ -289,8 +289,8 @@ function validateDate(dateString) {
     return moment().add(parseInt(inMonthsMatch[1]), 'months').format('YYYY-MM-DD');
   }
   
-  // NEW: Handle partial dates - just day number (e.g., "25", "25th")
-  const dayOnlyMatch = lowerString.match(/^(\d{1,2})(?:st|nd|rd|th)?$/);
+  // NEW: Handle partial dates - day number anywhere in the string (e.g., "on 25th", "25", "25th")
+  const dayOnlyMatch = lowerString.match(/(\d{1,2})(?:st|nd|rd|th)?/);
   if (dayOnlyMatch) {
     const day = parseInt(dayOnlyMatch[1]);
     if (day >= 1 && day <= 31) {
@@ -814,8 +814,8 @@ Or just tell me where you want to go!`,
           const { origin, destination, date, preference } = { ...context, preference: prefMatch };
           
           // Validate all inputs
-          const validOrigin = validateCityCode(origin);
-          const validDestination = validateCityCode(destination);
+          const validOrigin = await validateCityCode(origin);
+          const validDestination = await validateCityCode(destination);
           const validDate = validateDate(date);
           const validPreference = validatePreference(preference);
           
