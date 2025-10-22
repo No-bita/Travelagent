@@ -28,29 +28,30 @@ A conversational flight search agent focused on Indian domestic flights, providi
    - Open `index.html` in your browser
    - Or serve it with a local server: `python -m http.server 8000`
 
-### Backend (FastAPI) — Setup & Run
+### Backend (Node.js) — Setup & Run
 
 1. Install dependencies
    ```bash
    cd backend
-   pip install -r requirements.txt
+   npm install
    ```
 2. Configure environment (optional)
-   - Copy `env.example` to `.env` at repo root and fill Amadeus credentials
-   - For multi-source: add Cleartrip keys
-     - `CLEARTRIP_API_KEY=...`
-     - `CLEARTRIP_API_BASE=https://partner.cleartrip.com/api` (example)
-     - `CLEARTRIP_API_HEADER=X-API-Key` (if required by partner)
+   - Copy `backend/env.example` to `backend/.env` and fill Amadeus credentials
    - Without credentials, system uses mock flight data
 3. Start API server (default http://localhost:8000)
    ```bash
-   python3 -m uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+   cd backend
+   node server.js
+   ```
+   Or use the startup script:
+   ```bash
+   ./start_system.sh
    ```
 4. Test endpoints
    - `GET http://localhost:8000/health`
-   - `POST http://localhost:8000/chat` with `{ "session_id": "demo", "message": "Book Mumbai to Delhi tomorrow morning" }`
+   - `POST http://localhost:8000/api/chat` with `{ "session_id": "demo", "message": "Book Mumbai to Delhi tomorrow morning" }`
 
-**Note**: The system works with mock data by default. For real Amadeus flight data, add your API credentials to `.env`.
+**Note**: The system works with mock data by default. For real Amadeus flight data, add your API credentials to `backend/.env`.
 
 ### Frontend ↔ Backend
 - The static `index.html` now talks to the backend at `http://localhost:8000`.
@@ -88,10 +89,12 @@ A conversational flight search agent focused on Indian domestic flights, providi
 
 ## Current Implementation
 
+- **Enhanced Date Processing**: Comprehensive natural language date parsing with support for "tomorrow", "next week", "25th", etc.
 - **Amadeus API Integration**: Real flight data from Amadeus API with fallback to mock data
 - **Smart Fallback**: Automatically uses mock data if API is unavailable or rate-limited
 - **Error Handling**: Comprehensive error handling for API failures
 - **Responsive Design**: Works on desktop and mobile devices
+- **Modern Node.js Backend**: Fast, scalable backend with enhanced utilities
 
 ## Future Enhancements
 
@@ -113,16 +116,16 @@ npm start
 
 ## Environment Variables
 
-Create a `.env` file based on `env.example`:
+Create a `backend/.env` file based on `backend/env.example`:
 
 ```
 AMADEUS_CLIENT_ID=your_amadeus_client_id_here
 AMADEUS_CLIENT_SECRET=your_amadeus_client_secret_here
-PORT=3000
+PORT=8000
 NODE_ENV=development
 ```
 
-**Note**: Get your Amadeus API credentials from [developers.amadeus.com](https://developers.amadeus.com/). See `AMADEUS_SETUP.md` for detailed setup instructions.
+**Note**: Get your Amadeus API credentials from [developers.amadeus.com](https://developers.amadeus.com/).
 
 ## License
 

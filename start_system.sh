@@ -44,14 +44,7 @@ if ! command -v node &> /dev/null; then
     exit 1
 fi
 
-# Check if Python is available
-if ! command -v python &> /dev/null; then
-    echo "❌ Python is not installed. Please install Python first."
-    exit 1
-fi
-
 echo "✅ Node.js version: $(node --version)"
-echo "✅ Python version: $(python --version)"
 
 # Check for port conflicts
 echo ""
@@ -71,7 +64,7 @@ fi
 echo ""
 echo "📦 Installing backend dependencies..."
 cd backend
-if ! pip install -r requirements.txt; then
+if ! npm install; then
     echo "❌ Failed to install backend dependencies"
     exit 1
 fi
@@ -80,12 +73,12 @@ cd ..
 echo ""
 echo "🚀 Starting Backend Server (Port 8000)..."
 cd backend
-python -m uvicorn main_async:app --host 0.0.0.0 --port 8000 --reload &
+node server.js &
 BACKEND_PID=$!
 cd ..
 
 # Wait for backend to start with retry logic
-if ! wait_for_service "http://localhost:8000/api/health" "Backend server"; then
+if ! wait_for_service "http://localhost:8000/health" "Backend server"; then
     echo "❌ Backend server failed to start"
     kill $BACKEND_PID 2>/dev/null
     exit 1
@@ -97,7 +90,7 @@ npm start &
 FRONTEND_PID=$!
 
 # Wait for frontend to start with retry logic
-if ! wait_for_service "http://localhost:3000/api/health" "Frontend server"; then
+if ! wait_for_service "http://localhost:3000" "Frontend server"; then
     echo "❌ Frontend server failed to start"
     kill $BACKEND_PID 2>/dev/null
     kill $FRONTEND_PID 2>/dev/null
@@ -112,14 +105,12 @@ echo "🌐 Backend:  http://localhost:8000"
 echo "🌐 Chat UI:  Open index.html in your browser"
 echo ""
 echo "🧪 Test the system:"
-echo "   curl -X POST http://localhost:3000/api/chat \\"
+echo "   curl -X POST http://localhost:8000/api/chat \\"
 echo "     -H 'Content-Type: application/json' \\"
-echo "     -d '{\"message\": \"bom to del tomorrow\", \"context\": {\"step\": \"initial\"}}'"
+echo "     -d '{\"message\": \"bom to del tomorrow\", \"session_id\": \"test123\"}'"
 echo ""
-echo "📊 Check backend city API:"
-echo "   curl -X POST http://localhost:8000/api/cities/match \\"
-echo "     -H 'Content-Type: application/json' \\"
-echo "     -d '{\"input\": \"coimbatore\"}'"
+echo "📊 Check backend health:"
+echo "   curl http://localhost:8000/health"
 echo ""
 echo "🛑 To stop the system, press Ctrl+C"
 
