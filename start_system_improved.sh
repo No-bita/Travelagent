@@ -85,22 +85,11 @@ if ! wait_for_service "http://localhost:8000/health" "Backend server"; then
 fi
 
 echo ""
-echo "🚀 Starting Frontend Server (Port 3000)..."
-npm start &
-FRONTEND_PID=$!
-
-# Wait for frontend to start with retry logic
-if ! wait_for_service "http://localhost:3000" "Frontend server"; then
-    echo "❌ Frontend server failed to start"
-    kill $BACKEND_PID 2>/dev/null
-    kill $FRONTEND_PID 2>/dev/null
-    exit 1
-fi
+echo "🌐 Frontend is served statically - open index.html in your browser"
 
 echo ""
 echo "🎉 System is running!"
 echo "====================="
-echo "🌐 Frontend: http://localhost:3000"
 echo "🌐 Backend:  http://localhost:8000"
 echo "🌐 Chat UI:  Open index.html in your browser"
 echo ""
@@ -119,7 +108,6 @@ cleanup() {
     echo ""
     echo "🛑 Stopping system..."
     kill $BACKEND_PID 2>/dev/null
-    kill $FRONTEND_PID 2>/dev/null
     echo "✅ System stopped"
     exit 0
 }
