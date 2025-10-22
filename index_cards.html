@@ -434,25 +434,70 @@
         </div>
         
         <div class="chat-input-container">
-            <input type="text" class="chat-input" id="messageInput" placeholder="Type your message..." onkeypress="handleKeyPress(event)">
-            <button class="send-button" onclick="sendMessage()">Send</button>
+            <input type="text" 
+                   class="chat-input" 
+                   id="messageInput" 
+                   placeholder="Type your message..." 
+                   onkeypress="handleKeyPress(event)"
+                   aria-label="Type your message"
+                   autocomplete="off"
+                   spellcheck="true">
+            <button class="send-button" 
+                    onclick="sendMessage()" 
+                    aria-label="Send message"
+                    title="Send message (Enter)">
+                Send
+            </button>
         </div>
     </div>
 
     <script>
-        const API_BASE = 'http://localhost:8000';
-        let sessionId = 'session_' + Math.random().toString(36).substr(2, 9);
+        // Configuration
+        const API_BASE = 'http://localhost:3000/api';
+        const MAX_RETRIES = 3;
+        const RETRY_DELAY = 1000; // 1 second
+        
+        // Session management
+        let sessionId = generateSessionId();
+        let isProcessing = false;
+        let retryCount = 0;
+
+        // Generate a more robust session ID
+        function generateSessionId() {
+            const timestamp = Date.now();
+            const random = Math.random().toString(36).substr(2, 9);
+            return `session_${timestamp}_${random}`;
+        }
+
+        // Input validation and sanitization
+        function sanitizeInput(input) {
+            return input.trim().replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '');
+        }
+
+        function validateInput(message) {
+            if (!message || message.length === 0) {
+                return { valid: false, error: 'Please enter a message' };
+            }
+            if (message.length > 1000) {
+                return { valid: false, error: 'Message is too long (max 1000 characters)' };
+            }
+            return { valid: true };
+        }
 
         function handleKeyPress(event) {
-            if (event.key === 'Enter') {
+            if (event.key === 'Enter' && !event.shiftKey) {
+                event.preventDefault();
                 sendMessage();
             }
         }
 
-        function addMessage(content, isUser = false) {
+        function addMessage(content, isUser = false, messageId = null) {
             const messagesContainer = document.getElementById('chatMessages');
             const messageDiv = document.createElement('div');
             messageDiv.className = `message ${isUser ? 'user' : 'bot'}`;
+            if (messageId) {
+                messageDiv.setAttribute('data-message-id', messageId);
+            }
             
             const contentDiv = document.createElement('div');
             contentDiv.className = 'message-content';
@@ -461,6 +506,13 @@
             messageDiv.appendChild(contentDiv);
             messagesContainer.appendChild(messageDiv);
             messagesContainer.scrollTop = messagesContainer.scrollHeight;
+        }
+
+        function removeMessage(messageId) {
+            const messageElement = document.querySelector(`[data-message-id="${messageId}"]`);
+            if (messageElement && messageElement.parentNode) {
+                messageElement.parentNode.removeChild(messageElement);
+            }
         }
 
         function createFlightCard(flight) {
@@ -559,21 +611,101 @@
             // Add booking logic here
         }
 
-        async function sendMessage() {
-            const input = document.getElementById('messageInput');
-            const message = input.value.trim();
-            
-            if (!message) return;
-            
-            // Add user message
-            addMessage(message, true);
-            input.value = '';
-            
-            // Show loading
+        function showLoadingMessage(messageId) {
             const loadingDiv = document.createElement('div');
             loadingDiv.className = 'message bot';
-            loadingDiv.innerHTML = '<div class="message-content"><div class="loading"></div> Searching flights...</div>';
+            loadingDiv.setAttribute('data-message-id', messageId);
+            loadingDiv.innerHTML = `
+                <div class="message-content">
+                    <div class="loading"></div> 
+                    <span id="loading-text">Searching flights...</span>
+                </div>
+            `;
             document.getElementById('chatMessages').appendChild(loadingDiv);
+            return loadingDiv;
+        }
+
+        function updateLoadingMessage(messageId, text) {
+            const loadingElement = document.querySelector(`[data-message-id="${messageId}"] #loading-text`);
+            if (loadingElement) {
+                loadingElement.textContent = text;
+            }
+        }
+
+        function showErrorMessage(error, canRetry = true) {
+            const errorMessage = `
+                <div class="message-content">
+                    <div style="color: #e74c3c; margin-bottom: 8px;">⚠️ ${error}</div>
+                    ${canRetry ? `
+                        <button onclick="retryLastMessage()" style="
+                            background: #e74c3c; 
+                            color: white; 
+                            border: none; 
+                            padding: 8px 16px; 
+                            border-radius: 20px; 
+                            cursor: pointer;
+                            font-size: 12px;
+                        ">Retry</button>
+                    ` : ''}
+                </div>
+            `;
+            addMessage(errorMessage, false);
+        }
+
+        async function retryLastMessage() {
+            if (isProcessing) return;
+            
+            const lastUserMessage = document.querySelector('.message.user:last-child');
+            if (lastUserMessage) {
+                const messageText = lastUserMessage.querySelector('.message-content').textContent;
+                document.getElementById('messageInput').value = messageText;
+                await sendMessage();
+            }
+        }
+
+        async function sendMessage() {
+            const input = document.getElementById('messageInput');
+            const rawMessage = input.value;
+            
+            // Input validation
+            const validation = validateInput(rawMessage);
+            if (!validation.valid) {
+                addMessage(`❌ ${validation.error}`, false);
+                return;
+            }
+
+            // Prevent multiple simultaneous requests
+            if (isProcessing) {
+                addMessage('⏳ Please wait, I\'m still processing your previous request...', false);
+                return;
+            }
+
+            const message = sanitizeInput(rawMessage);
+            const messageId = `msg_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
+            
+            isProcessing = true;
+            input.disabled = true;
+            document.querySelector('.send-button').disabled = true;
+            
+            // Add user message
+            addMessage(message, true, `user_${messageId}`);
+            input.value = '';
+            
+            // Show loading with progress updates
+            const loadingId = `loading_${messageId}`;
+            showLoadingMessage(loadingId);
+            
+            // Simulate progress updates
+            const progressUpdates = [
+                { delay: 500, text: 'Analyzing your request...' },
+                { delay: 1000, text: 'Searching available flights...' },
+                { delay: 1500, text: 'Comparing prices and schedules...' },
+                { delay: 2000, text: 'Finalizing results...' }
+            ];
+            
+            progressUpdates.forEach(({ delay, text }) => {
+                setTimeout(() => updateLoadingMessage(loadingId, text), delay);
+            });
             
             try {
                 const response = await fetch(`${API_BASE}/chat`, {
@@ -587,31 +719,116 @@
                     })
                 });
                 
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+                
                 const data = await response.json();
                 
-                // Remove loading
-                document.getElementById('chatMessages').removeChild(loadingDiv);
+                // Remove loading message
+                removeMessage(loadingId);
                 
-                // Add bot response
-                let botMessage = data.reply;
+                // Handle different response formats
+                let botMessage = data.response || data.reply || data.message || "I'm sorry, I didn't understand that.";
                 
                 // Add flight cards if available
-                if (data.flight_cards && data.flight_cards.length > 0) {
+                if (Array.isArray(data.flight_cards) && data.flight_cards.length > 0) {
                     botMessage += renderFlightCards(data.flight_cards);
                 }
                 
-                addMessage(botMessage, false);
+                // Add context information if available
+                if (data.context) {
+                    console.log("Context:", data.context);
+                }
+                
+                addMessage(botMessage, false, `bot_${messageId}`);
+                
+                // Reset retry count on success
+                retryCount = 0;
                 
             } catch (error) {
                 console.error('Error:', error);
-                document.getElementById('chatMessages').removeChild(loadingDiv);
-                addMessage('Sorry, I encountered an error. Please try again.', false);
+                removeMessage(loadingId);
+                
+                let errorMessage = 'Sorry, I encountered an error. ';
+                let canRetry = true;
+                
+                if (error.name === 'TypeError' && error.message.includes('fetch')) {
+                    errorMessage += 'Unable to connect to the server. Please check your internet connection.';
+                } else if (error.message.includes('HTTP 5')) {
+                    errorMessage += 'Server error. Please try again in a moment.';
+                } else if (error.message.includes('HTTP 4')) {
+                    errorMessage += 'Invalid request. Please try rephrasing your message.';
+                } else {
+                    errorMessage += 'Please try again.';
+                }
+                
+                showErrorMessage(errorMessage, canRetry);
+                
+                // Auto-retry logic for network errors
+                if (retryCount < MAX_RETRIES && (error.name === 'TypeError' || error.message.includes('HTTP 5'))) {
+                    retryCount++;
+                    setTimeout(() => {
+                        if (retryCount <= MAX_RETRIES) {
+                            addMessage(`🔄 Retrying... (${retryCount}/${MAX_RETRIES})`, false);
+                            sendMessage();
+                        }
+                    }, RETRY_DELAY * retryCount);
+                }
+            } finally {
+                isProcessing = false;
+                input.disabled = false;
+                document.querySelector('.send-button').disabled = false;
+                input.focus();
             }
         }
+
+        // Accessibility improvements
+        function announceToScreenReader(message) {
+            const announcement = document.createElement('div');
+            announcement.setAttribute('aria-live', 'polite');
+            announcement.setAttribute('aria-atomic', 'true');
+            announcement.style.position = 'absolute';
+            announcement.style.left = '-10000px';
+            announcement.style.width = '1px';
+            announcement.style.height = '1px';
+            announcement.style.overflow = 'hidden';
+            announcement.textContent = message;
+            document.body.appendChild(announcement);
+            
+            setTimeout(() => {
+                document.body.removeChild(announcement);
+            }, 1000);
+        }
+
+        function handleKeyboardNavigation(event) {
+            // Escape key to clear input
+            if (event.key === 'Escape') {
+                const input = document.getElementById('messageInput');
+                input.value = '';
+                input.focus();
+            }
+            
+            // Ctrl/Cmd + Enter for quick send
+            if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
+                event.preventDefault();
+                sendMessage();
+            }
+        }
+
+        // Add keyboard event listener for global navigation
+        document.addEventListener('keydown', handleKeyboardNavigation);
 
         // Initialize with a welcome message
         document.addEventListener('DOMContentLoaded', function() {
             addMessage('Welcome! Try saying: "Book Mumbai to Delhi tomorrow morning"', false);
+            
+            // Focus on input for better UX
+            const input = document.getElementById('messageInput');
+            input.focus();
+            
+            // Announce to screen readers
+            announceToScreenReader('Travel agent chat loaded. You can now type your message.');
         });
     </script>
 </body>

@@ -389,347 +389,661 @@
 </head>
 <body>
     <div class="chat-container">
-        <div class="chat-header">
-            ✈️ Travel Agent - Flight Search for India
+      <div class="chat-header">
+        ✈️ Travel Agent - Flight Search for India
+      </div>
+  
+      <div class="chat-messages" id="chatMessages"></div>
+  
+      <div class="chat-input-container">
+        <div class="chat-input">
+          <input type="text" id="messageInput" placeholder="Type your message here..." autocomplete="off">
+          <button id="sendButton" onclick="sendMessage()">Send</button>
         </div>
-        
-        <div class="chat-messages" id="chatMessages">
-        </div>
-        
-        <div class="chat-input-container">
-            <div class="chat-input">
-                <input type="text" id="messageInput" placeholder="Type your message here..." autocomplete="off">
-                <button id="sendButton" onclick="sendMessage()">Send</button>
-            </div>
-        </div>
+      </div>
     </div>
-
+  
     <script>
-        const API_BASE = 'http://localhost:3000';
-        let context = { step: 'initial' };
-        const sessionId = (() => {
-            const key = 'travel_agent_session_id';
-            let val = localStorage.getItem(key);
-            if (!val) {
-                val = 'sess_' + Math.random().toString(36).slice(2);
-                localStorage.setItem(key, val);
-            }
-            return val;
-        })();
+      const API_BASE = 'http://localhost:3000';
+      let context = { step: 'initial' };
+      const sessionId = (() => {
+        const key = 'travel_agent_session_id';
+        let val = localStorage.getItem(key);
+        if (!val) {
+          val = 'sess_' + Math.random().toString(36).slice(2);
+          localStorage.setItem(key, val);
+        }
+        return val;
+      })();
+  
+      const chatMessages = document.getElementById('chatMessages');
+      const messageInput = document.getElementById('messageInput');
+      const sendButton = document.getElementById('sendButton');
 
-        const chatMessages = document.getElementById('chatMessages');
-        const messageInput = document.getElementById('messageInput');
-        const sendButton = document.getElementById('sendButton');
+      // Error handling configuration
+      const ERROR_CONFIG = {
+        maxRetries: 3,
+        retryDelay: 1000,
+        requestTimeout: 30000,
+        showErrorDetails: false // Set to true for debugging
+      };
 
-        // Function to update placeholder based on context
-        function updatePlaceholder() {
-            if (!context) {
-                messageInput.placeholder = "Type your message here...";
-                return;
-            }
+      let retryCount = 0;
+      let isOffline = false;
 
-            // Check what information is missing based on NLP Engine state
-            if (!context.from) {
-                messageInput.placeholder = "Enter flight details (e.g., 'bom to del tomorrow' or 'Mumbai to Delhi next Monday')";
-            } else if (!context.to) {
-                messageInput.placeholder = "Enter your destination city (e.g., Delhi, Mumbai, Chennai)";
-            } else if (!context.date) {
-                messageInput.placeholder = "Enter travel date (e.g., tomorrow, 25 Dec, next Monday)";
-            } else if (!context.preference) {
-                messageInput.placeholder = "Choose preference: price, time, or convenience";
-            } else {
-                messageInput.placeholder = "Ask about flights, book another trip, or type your message...";
-            }
+      // Global error handling
+      window.addEventListener('error', function(event) {
+        console.error('Global error:', event.error);
+        handleError('An unexpected error occurred. Please refresh the page.', 'GLOBAL_ERROR');
+      });
+
+      window.addEventListener('unhandledrejection', function(event) {
+        console.error('Unhandled promise rejection:', event.reason);
+        handleError('A network error occurred. Please check your connection.', 'PROMISE_REJECTION');
+        event.preventDefault();
+      });
+
+      // Network status monitoring
+      window.addEventListener('online', function() {
+        isOffline = false;
+        addMessage('🟢 Connection restored. You can now search for flights.', false);
+      });
+
+      window.addEventListener('offline', function() {
+        isOffline = true;
+        addMessage('🔴 You are offline. Some features may not work properly.', false);
+      });
+
+      // Error handling functions
+      function handleError(message, errorType = 'UNKNOWN', error = null) {
+        console.error(`Error [${errorType}]:`, error);
+        
+        // Log error for monitoring (in production, send to logging service)
+        logError(errorType, error, message);
+        
+        // Show user-friendly error message
+        addMessage(`⚠️ ${message}`, false);
+        
+        // Add retry option for certain errors
+        if (errorType === 'NETWORK_ERROR' && retryCount < ERROR_CONFIG.maxRetries) {
+          addRetryOption();
+        }
+        
+        // Reset UI state
+        resetUIState();
+      }
+
+      function logError(errorType, error, userMessage) {
+        const errorLog = {
+          timestamp: new Date().toISOString(),
+          errorType: errorType,
+          userMessage: userMessage,
+          error: error ? {
+            message: error.message,
+            stack: error.stack,
+            name: error.name
+          } : null,
+          userAgent: navigator.userAgent,
+          url: window.location.href,
+          sessionId: sessionId,
+          retryCount: retryCount,
+          isOffline: isOffline
+        };
+
+        // In production, send to logging service
+        if (ERROR_CONFIG.showErrorDetails) {
+          console.error('Error Log:', errorLog);
         }
 
-        // Auto-focus input
+        // Store in localStorage for debugging (remove in production)
+        try {
+          const existingLogs = JSON.parse(localStorage.getItem('error_logs') || '[]');
+          existingLogs.push(errorLog);
+          
+          // Keep only last 50 errors
+          if (existingLogs.length > 50) {
+            existingLogs.splice(0, existingLogs.length - 50);
+          }
+          
+          localStorage.setItem('error_logs', JSON.stringify(existingLogs));
+        } catch (storageError) {
+          console.error('Failed to log error to localStorage:', storageError);
+        }
+      }
+
+      function addRetryOption() {
+        const retryDiv = document.createElement('div');
+        retryDiv.className = 'message bot';
+        const contentDiv = document.createElement('div');
+        contentDiv.className = 'message-content';
+        
+        const retryBtn = document.createElement('button');
+        retryBtn.textContent = '🔄 Try Again';
+        retryBtn.style.marginRight = '8px';
+        retryBtn.onclick = () => {
+          retryCount++;
+          sendMessage();
+        };
+        
+        contentDiv.appendChild(retryBtn);
+        retryDiv.appendChild(contentDiv);
+        chatMessages.appendChild(retryDiv);
+        chatMessages.scrollTop = chatMessages.scrollHeight;
+      }
+
+      function resetUIState() {
+        sendButton.disabled = false;
+        sendButton.classList.remove('loading');
+        hideIndicator();
         messageInput.focus();
+      }
 
-        // Handle Enter key
-        messageInput.addEventListener('keypress', function(e) {
-            if (e.key === 'Enter' && !e.shiftKey) {
-                e.preventDefault();
-                sendMessage();
-            }
+      function createTimeoutPromise(timeout) {
+        return new Promise((_, reject) => {
+          setTimeout(() => reject(new Error('Request timeout')), timeout);
         });
+      }
 
-        function addMessage(content, isUser = false) {
-            const messageDiv = document.createElement('div');
-            messageDiv.className = `message ${isUser ? 'user' : 'bot'}`;
-            
-            const contentDiv = document.createElement('div');
-            contentDiv.className = 'message-content';
-            
-            // Check if content contains flight options
-            if (content.includes('**') && content.includes('₹')) {
-                contentDiv.innerHTML = formatFlightMessage(content);
-            } else {
-                contentDiv.textContent = content;
-            }
-            
-            messageDiv.appendChild(contentDiv);
-            chatMessages.appendChild(messageDiv);
-            chatMessages.scrollTop = chatMessages.scrollHeight;
+      // Security: Input sanitization functions
+      function sanitizeInput(input) {
+        if (typeof input !== 'string') return '';
+        
+        // Remove potentially dangerous HTML tags and attributes
+        return input
+          .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
+          .replace(/<iframe\b[^<]*(?:(?!<\/iframe>)<[^<]*)*<\/iframe>/gi, '')
+          .replace(/<object\b[^<]*(?:(?!<\/object>)<[^<]*)*<\/object>/gi, '')
+          .replace(/<embed\b[^<]*(?:(?!<\/embed>)<[^<]*)*<\/embed>/gi, '')
+          .replace(/<link\b[^<]*>/gi, '')
+          .replace(/<meta\b[^<]*>/gi, '')
+          .replace(/on\w+\s*=\s*["'][^"']*["']/gi, '')
+          .replace(/javascript:/gi, '')
+          .replace(/vbscript:/gi, '')
+          .replace(/data:/gi, '')
+          .trim();
+      }
+
+      function escapeHtml(text) {
+        if (typeof text !== 'string') return '';
+        
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+      }
+
+      function validateFlightData(flight) {
+        if (!flight || typeof flight !== 'object') return false;
+        
+        const requiredFields = ['id', 'airline', 'price', 'departureTime', 'arrivalTime', 'duration'];
+        return requiredFields.every(field => 
+          flight.hasOwnProperty(field) && 
+          flight[field] !== null && 
+          flight[field] !== undefined
+        );
+      }
+
+      function sanitizeFlightData(flight) {
+        if (!validateFlightData(flight)) return null;
+        
+        return {
+          id: sanitizeInput(String(flight.id)),
+          airline: sanitizeInput(String(flight.airline)),
+          price: Math.max(0, Number(flight.price) || 0),
+          departureTime: sanitizeInput(String(flight.departureTime)),
+          arrivalTime: sanitizeInput(String(flight.arrivalTime)),
+          duration: Math.max(0, Number(flight.duration) || 0),
+          category: sanitizeInput(String(flight.category || 'Economy'))
+        };
+      }
+  
+      function updatePlaceholder() {
+        if (!context) {
+          messageInput.placeholder = "Type your message here...";
+          return;
+        }
+  
+        if (!context.origin) {
+          messageInput.placeholder = "Enter flight details (e.g., 'bom to del tomorrow')";
+        } else if (!context.destination) {
+          messageInput.placeholder = "Enter your destination city (e.g., Delhi, Mumbai, Chennai)";
+        } else if (!context.date) {
+          messageInput.placeholder = "Enter travel date (e.g., tomorrow, 25 Dec, next Monday)";
+        } else if (!context.preference) {
+          messageInput.placeholder = "Choose preference: price, time, or convenience";
+        } else {
+          messageInput.placeholder = "Ask about flights or start a new search...";
+        }
+      }
+  
+      messageInput.focus();
+  
+      messageInput.addEventListener('keypress', function(e) {
+        if (e.key === 'Enter' && !e.shiftKey) {
+          e.preventDefault();
+          sendMessage();
+        }
+      });
+  
+      function addMessage(content, isUser = false) {
+        const messageDiv = document.createElement('div');
+        messageDiv.className = `message ${isUser ? 'user' : 'bot'}`;
+
+        const contentDiv = document.createElement('div');
+        contentDiv.className = 'message-content';
+
+        // Security: Sanitize content before displaying
+        const sanitizedContent = sanitizeInput(content);
+        
+        if (sanitizedContent.includes('**') && sanitizedContent.includes('₹')) {
+          contentDiv.innerHTML = formatFlightMessage(sanitizedContent);
+        } else {
+          // Use textContent for user messages to prevent XSS
+          if (isUser) {
+            contentDiv.textContent = sanitizedContent;
+          } else {
+            // For bot messages, escape HTML but allow basic formatting
+            contentDiv.innerHTML = escapeHtml(sanitizedContent);
+          }
         }
 
-        function formatFlightMessage(content) {
-            // Convert markdown-like formatting to HTML
-            let formatted = content
-                .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
-                .replace(/\n\n/g, '</div><div class="flight-option">')
-                .replace(/\n/g, '<br>');
-            
-            // Wrap flight options in containers
-            if (formatted.includes('<strong>')) {
-                formatted = '<div class="flight-option">' + formatted + '</div>';
-            }
-            
-            return formatted;
+        messageDiv.appendChild(contentDiv);
+        chatMessages.appendChild(messageDiv);
+        chatMessages.scrollTop = chatMessages.scrollHeight;
+      }
+  
+      function formatFlightMessage(content) {
+        let formatted = content
+          .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+          .replace(/\n\n/g, '</div><div class="flight-option">')
+          .replace(/\n/g, '<br>');
+  
+        if (formatted.includes('<strong>')) {
+          formatted = '<div class="flight-option">' + formatted + '</div>';
+        }
+  
+        return formatted;
+      }
+  
+      function showIndicator(text = 'Typing...') {
+        const div = document.createElement('div');
+        div.className = 'message bot';
+        div.id = 'typingIndicator';
+        const inner = document.createElement('div');
+        inner.className = 'typing-indicator show';
+        inner.textContent = text;
+        div.appendChild(inner);
+        chatMessages.appendChild(div);
+        chatMessages.scrollTop = chatMessages.scrollHeight;
+      }
+  
+      function hideIndicator() {
+        const el = document.getElementById('typingIndicator');
+        if (el) el.remove();
+      }
+  
+      async function sendMessage() {
+        const rawMessage = messageInput.value.trim();
+        if (!rawMessage) return;
+
+        // Check if offline
+        if (isOffline) {
+          addMessage('🔴 You are currently offline. Please check your internet connection.', false);
+          return;
         }
 
-        function showTypingIndicator() {
-            const typingDiv = document.createElement('div');
-            typingDiv.className = 'message bot';
-            typingDiv.id = 'typingIndicator';
-            
-            const contentDiv = document.createElement('div');
-            contentDiv.className = 'typing-indicator show';
-            contentDiv.textContent = 'Searching for flights...';
-            
-            typingDiv.appendChild(contentDiv);
-            chatMessages.appendChild(typingDiv);
-            chatMessages.scrollTop = chatMessages.scrollHeight;
+        // Security: Sanitize user input before processing
+        const message = sanitizeInput(rawMessage);
+        if (!message) {
+          addMessage('⚠️ Invalid input detected. Please try again.', false);
+          return;
         }
 
-        function showSearchingIndicator() {
-            const searchingDiv = document.createElement('div');
-            searchingDiv.className = 'message bot';
-            searchingDiv.id = 'searchingIndicator';
-            
-            const contentDiv = document.createElement('div');
-            contentDiv.className = 'searching-indicator show';
-            contentDiv.innerHTML = `
-                <div class="loading-spinner"></div>
-                <span id="searchingText">🔍 Searching flights...</span>
-            `;
-            
-            searchingDiv.appendChild(contentDiv);
-            chatMessages.appendChild(searchingDiv);
-            chatMessages.scrollTop = chatMessages.scrollHeight;
-            
-            // Animate the searching text
-            const searchingText = document.getElementById('searchingText');
-            const messages = [
-                '🔍 Searching flights...',
-                '✈️ Finding best options...',
-                '💰 Comparing prices...',
-                '⏰ Checking schedules...',
-                '🎯 Ranking results...'
-            ];
-            
-            let messageIndex = 0;
-            const interval = setInterval(() => {
-                if (searchingText) {
-                    searchingText.textContent = messages[messageIndex];
-                    messageIndex = (messageIndex + 1) % messages.length;
-                } else {
-                    clearInterval(interval);
-                }
-            }, 1000);
-            
-            // Store interval ID for cleanup
-            searchingDiv.dataset.intervalId = interval;
-        }
+        addMessage(message, true);
+        messageInput.value = '';
+        sendButton.disabled = true;
+        sendButton.classList.add('loading');
+        showIndicator('🔍 Searching flights...');
 
-        function hideTypingIndicator() {
-            const typingIndicator = document.getElementById('typingIndicator');
-            if (typingIndicator) {
-                typingIndicator.remove();
-            }
-        }
+        try {
+          // Create timeout promise
+          const timeoutPromise = createTimeoutPromise(ERROR_CONFIG.requestTimeout);
+          
+          // Create fetch promise
+          const fetchPromise = fetch(`${API_BASE}/api/chat`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ session_id: sessionId, message, context })
+          });
 
-        function hideSearchingIndicator() {
-            const searchingIndicator = document.getElementById('searchingIndicator');
-            if (searchingIndicator) {
-                // Clear the interval if it exists
-                const intervalId = searchingIndicator.dataset.intervalId;
-                if (intervalId) {
-                    clearInterval(parseInt(intervalId));
-                }
-                searchingIndicator.remove();
-            }
-        }
+          // Race between fetch and timeout
+          const response = await Promise.race([fetchPromise, timeoutPromise]);
+  
+          // Check response status
+          if (!response.ok) {
+            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+          }
 
-        async function sendMessage() {
-            const message = messageInput.value.trim();
-            if (!message) return;
+          const data = await response.json();
+          hideIndicator();
 
-            // Add user message
-            addMessage(message, true);
-            messageInput.value = '';
-            sendButton.disabled = true;
-            sendButton.classList.add('loading');
+          // Reset retry count on successful request
+          retryCount = 0;
 
-            // Show appropriate loading indicator
-            const isSearchingFlights = message.toLowerCase().includes('price') || 
-                                     message.toLowerCase().includes('time') || 
-                                     message.toLowerCase().includes('convenience') ||
-                                     message.toLowerCase().includes('search');
-            
-            if (isSearchingFlights) {
-                showSearchingIndicator();
-            } else {
-                showTypingIndicator();
-            }
+          // Security: Validate API response structure
+          if (!data || typeof data !== 'object') {
+            throw new Error('Invalid response structure from server');
+          }
 
+          // Security: Sanitize response message
+          const responseMessage = data.response || data.reply || "Sorry, I didn't get that.";
+          addMessage(sanitizeInput(responseMessage));
+
+          // Security: Validate context object
+          if (data.context && typeof data.context === 'object') {
+            context = data.context;
+            updatePlaceholder();
+          }
+
+          // Security: Validate and render flight cards
+          if (data.flight_cards && Array.isArray(data.flight_cards) && data.flight_cards.length > 0) {
             try {
-                const response = await fetch(`${API_BASE}/api/chat`, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({
-                        session_id: sessionId,
-                        message: message
-                    })
-                });
-
-                const data = await response.json();
-                
-                // Hide loading indicators
-                hideTypingIndicator();
-                hideSearchingIndicator();
-                
-                // Add bot response
-                addMessage(data.reply || '');
-
-                // Update context for next request
-                if (data.state_summary) {
-                    context = data.state_summary;
-                    updatePlaceholder(); // Update placeholder based on new context
-                }
-
-                // No redundant state summary chips - just show the bot's reply and cards
-
-                // Render flight cards
-                if (data.flight_cards && data.flight_cards.length > 0) {
-                    const cardsDiv = document.createElement('div');
-                    cardsDiv.className = 'message bot';
-                    const contentDiv = document.createElement('div');
-                    contentDiv.className = 'message-content';
-                    
-                    const cardsContainer = document.createElement('div');
-                    cardsContainer.className = 'flight-cards';
-                    
-                    data.flight_cards.forEach((flight, index) => {
-                        const card = document.createElement('div');
-                        card.className = 'flight-card';
-                        card.dataset.flightId = flight.id;
-                        
-                        card.innerHTML = `
-                            <div class="flight-category">${flight.category}</div>
-                            <div class="flight-header">
-                                <div class="flight-airline">${flight.airline}</div>
-                                <div class="flight-price">₹${flight.price.toLocaleString()}</div>
-                            </div>
-                            <div class="flight-details">
-                                <div class="flight-detail">
-                                    <div class="flight-detail-label">Departure</div>
-                                    <div class="flight-detail-value">${flight.departureTime}</div>
-                                </div>
-                                <div class="flight-detail">
-                                    <div class="flight-detail-label">Arrival</div>
-                                    <div class="flight-detail-value">${flight.arrivalTime}</div>
-                                </div>
-                                <div class="flight-detail">
-                                    <div class="flight-detail-label">Duration</div>
-                                    <div class="flight-detail-value">${Math.floor(flight.duration / 60)}h ${flight.duration % 60}m</div>
-                                </div>
-                            </div>
-                            <div class="flight-actions">
-                                <button class="book-now-btn" onclick="bookFlight('${flight.id}', '${flight.airline}', ${flight.price})">
-                                    Book Now
-                                </button>
-                                <button class="details-btn" onclick="showFlightDetails('${flight.id}')">
-                                    Details
-                                </button>
-                            </div>
-                        `;
-                        
-                        cardsContainer.appendChild(card);
-                    });
-                    
-                    contentDiv.appendChild(cardsContainer);
-                    cardsDiv.appendChild(contentDiv);
-                    chatMessages.appendChild(cardsDiv);
-                    chatMessages.scrollTop = chatMessages.scrollHeight;
-                }
-
-                // Render action chips
-                if (Array.isArray(data.actions) && data.actions.length) {
-                    const actionsDiv = document.createElement('div');
-                    actionsDiv.className = 'message bot';
-                    const contentDiv = document.createElement('div');
-                    contentDiv.className = 'message-content';
-                    data.actions.forEach((label) => {
-                        const btn = document.createElement('button');
-                        btn.textContent = label;
-                        btn.style.marginRight = '8px';
-                        btn.style.marginTop = '6px';
-                        btn.onclick = () => {
-                            messageInput.value = label;
-                            sendMessage();
-                        };
-                        contentDiv.appendChild(btn);
-                    });
-                    actionsDiv.appendChild(contentDiv);
-                    chatMessages.appendChild(actionsDiv);
-                    chatMessages.scrollTop = chatMessages.scrollHeight;
-                }
-                
-            } catch (error) {
-                hideTypingIndicator();
-                hideSearchingIndicator();
-                addMessage('Sorry, I encountered an error. Please try again.', false);
-                console.error('Error:', error);
-            } finally {
-                sendButton.disabled = false;
-                sendButton.classList.remove('loading');
-                messageInput.focus();
+              renderFlightCards(data.flight_cards);
+            } catch (renderError) {
+              console.error('Error rendering flight cards:', renderError);
+              addMessage('⚠️ Error displaying flight results. Please try again.', false);
             }
-        }
+          }
 
-        // Flight booking and details functions
-        function bookFlight(flightId, airline, price) {
-            addMessage(`Great choice! You've selected ${airline} for ₹${price.toLocaleString()}. Let me help you with the booking process...`, false);
-            
-            // Simulate booking process
-            setTimeout(() => {
-                addMessage("🎉 Booking confirmed! Your flight has been reserved. You'll receive a confirmation email shortly with your booking details and e-ticket.", false);
-                addMessage("Is there anything else I can help you with? You can search for more flights or ask about your booking.", false);
-            }, 2000);
-        }
-
-        function showFlightDetails(flightId) {
-            // Find the flight card and show more details
-            const card = document.querySelector(`[data-flight-id="${flightId}"]`);
-            if (card) {
-                // Toggle selection
-                document.querySelectorAll('.flight-card').forEach(c => c.classList.remove('selected'));
-                card.classList.add('selected');
-                
-                // Show additional details (this would typically fetch from the server)
-                addMessage(`Here are the detailed information for this flight:\n\n• Flight Number: ${flightId}\n• Aircraft: Boeing 737\n• Baggage: 15kg included\n• Meal: Available for purchase\n• Seat Selection: Available\n• Check-in: Online 24 hours before departure`, false);
+          // Security: Validate and render action buttons
+          if (Array.isArray(data.actions) && data.actions.length > 0) {
+            try {
+              renderActionButtons(data.actions);
+            } catch (renderError) {
+              console.error('Error rendering action buttons:', renderError);
             }
-        }
+          }
 
-        // Initial bot message - start the conversation immediately
-        setTimeout(() => {
+        } catch (error) {
+          hideIndicator();
+          
+          // Determine error type and handle accordingly
+          if (error.message === 'Request timeout') {
+            handleError('Request timed out. The server is taking too long to respond.', 'TIMEOUT_ERROR', error);
+          } else if (error.name === 'TypeError' && error.message.includes('fetch')) {
+            handleError('Unable to connect to the server. Please check your internet connection.', 'NETWORK_ERROR', error);
+          } else if (error.message.includes('HTTP')) {
+            handleError('Server error occurred. Please try again later.', 'SERVER_ERROR', error);
+          } else if (error.message.includes('Invalid response')) {
+            handleError('Invalid data received from server. Please try again.', 'DATA_ERROR', error);
+          } else {
+            handleError('An unexpected error occurred. Please try again.', 'UNKNOWN_ERROR', error);
+          }
+          
+          console.error('Send message error:', error);
+        } finally {
+          resetUIState();
+        }
+      }
+  
+      function renderFlightCards(cards) {
+        try {
+          // Security: Validate input data
+          if (!Array.isArray(cards)) {
+            throw new Error('Invalid flight cards data structure');
+          }
+
+          if (cards.length === 0) {
+            addMessage('No flights found for your search criteria. Please try different dates or destinations.', false);
+            return;
+          }
+
+          const cardsDiv = document.createElement('div');
+          cardsDiv.className = 'message bot';
+          const contentDiv = document.createElement('div');
+          contentDiv.className = 'message-content';
+
+          const cardsContainer = document.createElement('div');
+          cardsContainer.className = 'flight-cards';
+
+          let validCardsCount = 0;
+
+          cards.forEach((flight, index) => {
+            try {
+              // Security: Sanitize flight data before rendering
+              const sanitizedFlight = sanitizeFlightData(flight);
+              if (!sanitizedFlight) {
+                console.warn(`Invalid flight data skipped at index ${index}:`, flight);
+                return;
+              }
+
+              const card = document.createElement('div');
+              card.className = 'flight-card';
+              card.dataset.flightId = sanitizedFlight.id;
+
+              // Security: Use textContent for safe data insertion
+              card.innerHTML = `
+                <div class="flight-category">${escapeHtml(sanitizedFlight.category)}</div>
+                <div class="flight-header">
+                  <div class="flight-airline">${escapeHtml(sanitizedFlight.airline)}</div>
+                  <div class="flight-price">₹${sanitizedFlight.price.toLocaleString()}</div>
+                </div>
+                <div class="flight-details">
+                  <div class="flight-detail">
+                    <div class="flight-detail-label">Departure</div>
+                    <div class="flight-detail-value">${escapeHtml(sanitizedFlight.departureTime)}</div>
+                  </div>
+                  <div class="flight-detail">
+                    <div class="flight-detail-label">Arrival</div>
+                    <div class="flight-detail-value">${escapeHtml(sanitizedFlight.arrivalTime)}</div>
+                  </div>
+                  <div class="flight-detail">
+                    <div class="flight-detail-label">Duration</div>
+                    <div class="flight-detail-value">${Math.floor(sanitizedFlight.duration / 60)}h ${sanitizedFlight.duration % 60}m</div>
+                  </div>
+                </div>
+                <div class="flight-actions">
+                  <button class="book-now-btn" onclick="bookFlight('${escapeHtml(sanitizedFlight.id)}', '${escapeHtml(sanitizedFlight.airline)}', ${sanitizedFlight.price})">Book Now</button>
+                  <button class="details-btn" onclick="showFlightDetails('${escapeHtml(sanitizedFlight.id)}')">Details</button>
+                </div>
+              `;
+
+              cardsContainer.appendChild(card);
+              validCardsCount++;
+            } catch (cardError) {
+              console.error(`Error rendering flight card at index ${index}:`, cardError);
+              // Continue with other cards instead of failing completely
+            }
+          });
+
+          // Check if we have any valid cards
+          if (validCardsCount === 0) {
+            addMessage('⚠️ No valid flight data could be displayed. Please try your search again.', false);
+            return;
+          }
+
+          contentDiv.appendChild(cardsContainer);
+          cardsDiv.appendChild(contentDiv);
+          chatMessages.appendChild(cardsDiv);
+          chatMessages.scrollTop = chatMessages.scrollHeight;
+
+        } catch (error) {
+          console.error('Error in renderFlightCards:', error);
+          addMessage('⚠️ Error displaying flight results. Please try your search again.', false);
+        }
+      }
+  
+      function renderActionButtons(actions) {
+        try {
+          // Security: Validate actions array
+          if (!Array.isArray(actions)) {
+            throw new Error('Invalid actions data structure');
+          }
+
+          if (actions.length === 0) {
+            return; // No actions to render
+          }
+
+          const actionsDiv = document.createElement('div');
+          actionsDiv.className = 'message bot';
+          const contentDiv = document.createElement('div');
+          contentDiv.className = 'message-content';
+          
+          let validActionsCount = 0;
+
+          actions.forEach((label, index) => {
+            try {
+              // Security: Sanitize action labels
+              const sanitizedLabel = sanitizeInput(String(label));
+              if (!sanitizedLabel) {
+                console.warn(`Invalid action label skipped at index ${index}:`, label);
+                return;
+              }
+
+              const btn = document.createElement('button');
+              btn.textContent = sanitizedLabel;
+              btn.style.marginRight = '8px';
+              btn.onclick = () => {
+                try {
+                  messageInput.value = sanitizedLabel;
+                  sendMessage();
+                } catch (clickError) {
+                  console.error('Error handling action button click:', clickError);
+                  addMessage('⚠️ Error processing your selection. Please try again.', false);
+                }
+              };
+              contentDiv.appendChild(btn);
+              validActionsCount++;
+            } catch (actionError) {
+              console.error(`Error rendering action button at index ${index}:`, actionError);
+              // Continue with other buttons
+            }
+          });
+
+          // Only render if we have valid actions
+          if (validActionsCount > 0) {
+            actionsDiv.appendChild(contentDiv);
+            chatMessages.appendChild(actionsDiv);
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+          }
+
+        } catch (error) {
+          console.error('Error in renderActionButtons:', error);
+          // Don't show error message for action buttons as they're not critical
+        }
+      }
+  
+      function bookFlight(flightId, airline, price) {
+        try {
+          // Security: Sanitize parameters
+          const sanitizedFlightId = sanitizeInput(String(flightId));
+          const sanitizedAirline = sanitizeInput(String(airline));
+          const sanitizedPrice = Math.max(0, Number(price) || 0);
+          
+          if (!sanitizedFlightId || !sanitizedAirline) {
+            throw new Error('Invalid flight data provided');
+          }
+
+          addMessage(`Great choice! You've selected ${sanitizedAirline} for ₹${sanitizedPrice.toLocaleString()}. Booking now...`, false);
+          
+          // Simulate booking process with error handling
+          setTimeout(() => {
+            try {
+              // Simulate potential booking failure (10% chance for demo)
+              if (Math.random() < 0.1) {
+                throw new Error('Booking service temporarily unavailable');
+              }
+              
+              addMessage("🎉 Booking confirmed! Your flight has been reserved. You'll receive a confirmation email shortly.", false);
+            } catch (bookingError) {
+              console.error('Booking simulation error:', bookingError);
+              addMessage('⚠️ Booking failed. Please try again or contact support.', false);
+            }
+          }, 1500);
+
+        } catch (error) {
+          console.error('Error in bookFlight:', error);
+          addMessage('⚠️ Error processing booking. Please try again.', false);
+        }
+      }
+
+      function showFlightDetails(flightId) {
+        try {
+          // Security: Sanitize flight ID
+          const sanitizedFlightId = sanitizeInput(String(flightId));
+          if (!sanitizedFlightId) {
+            throw new Error('Invalid flight ID provided');
+          }
+          
+          // Simulate potential service failure
+          if (Math.random() < 0.05) { // 5% chance for demo
+            throw new Error('Flight details service temporarily unavailable');
+          }
+          
+          addMessage(`Here are more details for flight ${sanitizedFlightId}: Aircraft Boeing 737, 15kg baggage, online check-in 24h before departure.`, false);
+          
+        } catch (error) {
+          console.error('Error in showFlightDetails:', error);
+          addMessage('⚠️ Unable to load flight details. Please try again.', false);
+        }
+      }
+  
+      // Initialize application with error handling
+      function initializeApp() {
+        try {
+          setTimeout(() => {
             addMessage("Hello! I'm your flight search assistant. I can help you find the best domestic flights in India.", false);
-            // Set context to start collecting information immediately
-            context = { from: null, to: null, date: null, preference: null };
-            updatePlaceholder(); // Set initial placeholder
-        }, 1000);
+            context = { origin: null, destination: null, date: null, preference: null };
+            updatePlaceholder();
+          }, 800);
+        } catch (initError) {
+          console.error('Error initializing app:', initError);
+          // Fallback initialization
+          addMessage("Welcome! I'm here to help you find flights.", false);
+        }
+      }
+
+      // Add error recovery function
+      function recoverFromError() {
+        try {
+          // Clear any pending states
+          hideIndicator();
+          resetUIState();
+          
+          // Reset retry count
+          retryCount = 0;
+          
+          // Show recovery message
+          addMessage("🔄 System recovered. You can continue searching for flights.", false);
+          
+        } catch (recoveryError) {
+          console.error('Error during recovery:', recoveryError);
+          // Last resort - reload page
+          if (confirm('A critical error occurred. Would you like to reload the page?')) {
+            window.location.reload();
+          }
+        }
+      }
+
+      // Add manual error recovery option
+      function addErrorRecoveryOption() {
+        const recoveryDiv = document.createElement('div');
+        recoveryDiv.className = 'message bot';
+        const contentDiv = document.createElement('div');
+        contentDiv.className = 'message-content';
+        
+        const recoveryBtn = document.createElement('button');
+        recoveryBtn.textContent = '🔄 Recover';
+        recoveryBtn.style.marginRight = '8px';
+        recoveryBtn.onclick = recoverFromError;
+        
+        contentDiv.appendChild(recoveryBtn);
+        recoveryDiv.appendChild(contentDiv);
+        chatMessages.appendChild(recoveryDiv);
+        chatMessages.scrollTop = chatMessages.scrollHeight;
+      }
+
+      // Initialize the application
+      initializeApp();
     </script>
-</body>
-</html>
+  </body>
+  </html>
